@@ -3,6 +3,7 @@ import 'services/shizuku_service.dart';
 import 'services/executor_service.dart';
 import 'utils/optimizer_logic.dart';
 import 'widgets/console_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const MyApp());
@@ -403,6 +404,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _launchURL() async {
+    final Uri url = Uri.parse('https://github.com/tew080');
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('Could not launch $url');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -518,11 +526,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
 
                 const SizedBox(height: 30),
-                const Center(
-                  child: Text(
-                    "v1.0.1 | Github: tew080",
-                    style: TextStyle(color: Colors.grey),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center, // จัดกึ่งกลาง
+                  children: [
+                    // ส่วนข้อความปกติ
+                    const Text(
+                      "v1.0.1 | Github: ",
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                    // ส่วนที่เป็นปุ่มกด
+                    InkWell(
+                      onTap: _launchURL, // เรียกฟังก์ชันเปิดเว็บ
+                      child: const Text(
+                        "tew080",
+                        style: TextStyle(
+                          color:
+                              Colors.blueAccent, // เปลี่ยนสีให้รู้ว่าเป็นลิงก์
+                          decoration: TextDecoration.underline, // ขีดเส้นใต้
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
