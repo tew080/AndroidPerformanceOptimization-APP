@@ -241,11 +241,36 @@ class OptimizerLogic {
   }
 
   // --- Menu 10: Touch Optimization ---
-  static List<String> getTouchOptimization(String ms) {
-    return [
+  static List<String> getTouchOptimization(String ms, bool isVivo) {
+    List<String> commands = [
       'setprop debug.sf.touch_latency_opt 1',
       'setprop debug.sf.set_touch_timer_ms $ms',
+      'setprop touch.deviceType touchScreen',
+      'setprop touch.gestureMode spots',
+      'setprop touch.orientation.calibration none',
+      'setprop touch.pressure.calibration amplitude',
+      'setprop touch.pressure.scale 0.001',
+      'setprop touch.size.calibration diameter',
+      'setprop touch.size.scale 1',
+      'setprop touch.size.bias 0',
+      'setprop touch.size.isSummed 0',
+      'setprop MultitouchSettleInterval 1ms',
+      'setprop MultitouchMinDistance 1px',
+      'setprop TapInterval 1ms',
+      'setprop TapSlop 1px',
     ];
+
+    if (isVivo) {
+      commands.addAll([
+        'settings put system game_touch_opt 1',
+        'settings put global game_touch_opt 1',
+        'am broadcast -a com.android.mgr.GAME_MODE_STATE_CHANGED --ei state 1',
+        'cmd power set-mode 0',
+        'setprop sys.game.touch.opt.enable 1',
+      ]);
+    }
+
+    return commands;
   }
 
   // --- Menu 11: Disable AA ---

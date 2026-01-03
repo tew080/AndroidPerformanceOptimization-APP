@@ -219,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onChanged: (v) => setDiagState(() => hz = v!),
               ),
               CheckboxListTile(
-                title: const Text("Vivo/iQOO Mode"),
+                title: const Text("Vivo/iQOO Device"),
                 value: isVivo,
                 onChanged: (v) => setDiagState(() => isVivo = v!),
               ),
@@ -378,31 +378,67 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showTouchDialog() {
-    TextEditingController ctrl = TextEditingController(text: "250");
+    TextEditingController ctrl = TextEditingController(text: "200");
+    bool isVivo = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Touch Timer (ms)"),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _run(
-                "Touch Opt ${ctrl.text}ms",
-                OptimizerLogic.getTouchOptimization(ctrl.text),
-              );
-            },
-            child: const Text("Apply"),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDiagState) {
+          return AlertDialog(
+            title: Row(
+              children: const [
+                Icon(Icons.touch_app, color: Colors.blue),
+                SizedBox(width: 10),
+                Text("Touch Optimization"),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: ctrl,
+                  decoration: const InputDecoration(
+                    labelText: "Touch Timer (ms)",
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    "Vivo/iQOO Device",
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  value: isVivo,
+                  onChanged: (v) {
+                    setDiagState(() => isVivo = v!);
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("Cancel"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _run(
+                    "Touch Opt ${ctrl.text}ms",
+                    OptimizerLogic.getTouchOptimization(ctrl.text, isVivo),
+                  );
+                },
+                child: const Text(
+                  "Apply",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -512,7 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 _buildBtn(
                   "Clean Junk & Cache",
-                  Icons.cleaning_services_outlined,
+                  Icons.delete_sweep_outlined,
                   // แก้ไขตรงนี้: ใช้ _run แทนการเรียก ExecutorService ตรงๆ
                   () => _run(
                     "Deep Cleaning...", // ข้อความที่จะโชว์หัวข้อใน Console
@@ -527,9 +563,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   () => _runCompile("AOT Compile (Speed)", "speed"),
                 ),
                 _buildBtn(
-                  "AOT Compile (Profile Mode)",
+                  "AOT Compile (Speed Profile Mode)",
                   Icons.timer,
-                  () => _runCompile("AOT Compile (Profile)", "speed-profile"),
+                  () => _runCompile(
+                    "AOT Compile (Speed Profile)",
+                    "speed-profile",
+                  ),
                 ),
                 _buildSection("APP & Task Manager"),
                 _buildBtn(
