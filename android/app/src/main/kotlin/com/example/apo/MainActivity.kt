@@ -14,6 +14,7 @@ import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import android.util.Log
+import android.app.ActivityManager
 
 class MainActivity : FlutterActivity() {
     // ชื่อ Channel ต้องตรงกับฝั่ง Dart 100%
@@ -129,6 +130,53 @@ class MainActivity : FlutterActivity() {
                         val apps = getDisabledAppList()
                         runOnUiThread { result.success(apps) }
                     }.start()
+                }
+
+                "startAutoCleaner" -> {
+                    val threshold = call.argument<Int>("threshold") ?: 500
+
+                    // [เพิ่ม] บันทึกค่าลง Memory เครื่อง (SharedPreferences)
+                    val prefs = getSharedPreferences("ApoPrefs", Context.MODE_PRIVATE)
+                    prefs.edit().putInt("auto_ram_threshold", threshold).apply()
+
+                    // รัน Service ตามปกติ
+                    val intent = Intent(this, OptimizationService::class.java).apply {
+                        putExtra("action", "start_auto")
+                        putExtra("threshold", threshold)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(true)
+                }
+
+                "stopAutoCleaner" -> {
+                    val intent = Intent(this, OptimizationService::class.java).apply {
+                        putExtra("action", "stop_auto")
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+
+                "getAutoCleanerThreshold" -> {
+                    val prefs = getSharedPreferences("ApoPrefs", Context.MODE_PRIVATE)
+                    // ค่า default 500 ถ้าไม่เคยตั้ง
+                    val savedThreshold = prefs.getInt("auto_ram_threshold", 500)
+                    result.success(savedThreshold)
+                }
+
+                "saveAutoCleanerThreshold" -> {
+                    val threshold = call.argument<Int>("threshold") ?: 500
+                    val prefs = getSharedPreferences("ApoPrefs", Context.MODE_PRIVATE)
+                    prefs.edit().putInt("auto_ram_threshold", threshold).apply()
+                    result.success(true)
+                }
+
+                "isAutoCleanerRunning" -> {
+                    val isRunning = isServiceRunning(OptimizationService::class.java)
+                    result.success(isRunning)
                 }
 
                 else -> result.notImplemented()
@@ -278,5 +326,16 @@ class MainActivity : FlutterActivity() {
             currentProcess = null
             "Error: ${e.message}"
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun isServiceRunning(serviceClass: Class<*>): Boolean {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+            if (serviceClass.name == service.service.className) {
+                return true
+            }
+        }
+        return false
     }
 }

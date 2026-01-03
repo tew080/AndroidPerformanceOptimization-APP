@@ -6,6 +6,7 @@ import 'widgets/console_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'widgets/process_manager.dart';
 import 'widgets/disabled_apps.dart';
+import 'widgets/auto_clean.dart';
 
 void main() {
   runApp(const MyApp());
@@ -509,7 +510,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   Icons.schedule,
                   () => _run("Bg Dex Opt", ["cmd package bg-dexopt-job"]),
                 ),
-
                 _buildBtn(
                   "Clean Junk & Cache",
                   Icons.cleaning_services_outlined,
@@ -532,6 +532,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   () => _runCompile("AOT Compile (Profile)", "speed-profile"),
                 ),
                 _buildSection("APP & Task Manager"),
+                _buildBtn(
+                  "Auto RAM Cleaner",
+                  Icons.autorenew, // แนะนำใช้ไอคอนนี้สื่อถึงการทำงานอัตโนมัติ
+                  () {
+                    // เปลี่ยนจาก _run เป็นการเปิดหน้าจอตั้งค่าแทน
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AutoCleanScreen(),
+                      ),
+                    );
+                  },
+                ),
                 _buildBtn("Running Processes Manager", Icons.list_alt, () {
                   Navigator.push(
                     context,

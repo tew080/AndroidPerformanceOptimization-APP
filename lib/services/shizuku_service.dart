@@ -125,4 +125,46 @@ class ShizukuService {
       return [];
     }
   }
+
+  // เปิดโหมด Auto Clean
+  static Future<void> startAutoCleaner(int thresholdMb) async {
+    try {
+      await platform.invokeMethod('startAutoCleaner', {
+        "threshold": thresholdMb,
+      });
+    } catch (_) {}
+  }
+
+  // ปิดโหมด Auto Clean
+  static Future<void> stopAutoCleaner() async {
+    try {
+      await platform.invokeMethod('stopAutoCleaner');
+    } catch (_) {}
+  }
+
+  static Future<bool> isAutoCleanerRunning() async {
+    try {
+      final bool result = await platform.invokeMethod('isAutoCleanerRunning');
+      return result;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<int> getAutoCleanerThreshold() async {
+    try {
+      final int result = await platform.invokeMethod('getAutoCleanerThreshold');
+      return result;
+    } catch (_) {
+      return 500; // ถ้า error ให้คืนค่า 500
+    }
+  }
+
+  static Future<void> saveAutoCleanerThreshold(int threshold) async {
+    try {
+      await platform.invokeMethod('saveAutoCleanerThreshold', {
+        "threshold": threshold,
+      });
+    } catch (_) {}
+  }
 }
