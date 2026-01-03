@@ -247,12 +247,14 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text("Select Skia Engine"),
-        content: const Text("Warning: System UI will restart."),
+        content: const Text(
+          "Warning: This will force stop all apps and restart System UI.",
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _run(
+              _runSkiaTask(
                 "Set SkiaGL (OpenGL)",
                 OptimizerLogic.getSkiaCommands(false),
               );
@@ -262,13 +264,25 @@ class _HomeScreenState extends State<HomeScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              _run("Set SkiaVK (Vulkan)", OptimizerLogic.getSkiaCommands(true));
+              _runSkiaTask(
+                "Set SkiaVK (Vulkan)",
+                OptimizerLogic.getSkiaCommands(true),
+              );
             },
             child: const Text("SkiaVK"),
           ),
         ],
       ),
     );
+  }
+
+  // Helper function ใหม่สำหรับเรียก Skia Task
+  void _runSkiaTask(String label, List<String> commands) {
+    if (!_ensurePermission()) return;
+    _showConsole(label); // เปิดหน้า Console
+
+    // เรียกใช้ฟังก์ชันพิเศษที่เราสร้างใน ExecutorService
+    ExecutorService.applySkiaAndRestart(label, commands);
   }
 
   void _showBloatwareDialog() {
