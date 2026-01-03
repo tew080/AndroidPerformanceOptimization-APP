@@ -23,6 +23,9 @@ class ExecutorService {
     logger.info("--------------------------------");
     logger.startLoading();
 
+    // เริ่ม Background Service (Notification)
+    await ShizukuService.startService("Preparing Compilation...");
+
     // ตรวจสอบสิทธิ์ก่อนเริ่ม
     bool hasPermission = await ShizukuService.checkPermission();
     if (!hasPermission) {
@@ -55,6 +58,7 @@ class ExecutorService {
       logger.error("Error: $e");
     } finally {
       logger.stopLoading();
+      await ShizukuService.stopService(); // ปิด Notification เมื่อจบ
     }
   }
 
