@@ -520,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 30),
                 const Center(
                   child: Text(
-                    "v1.0.0 | Github: tew080",
+                    "v1.0.1 | Github: tew080",
                     style: TextStyle(color: Colors.grey),
                   ),
                 ),
