@@ -70,4 +70,59 @@ class ShizukuService {
       await platform.invokeMethod('stopService');
     } catch (_) {}
   }
+
+  // [เพิ่ม] ดึงรายชื่อแอพที่รันอยู่
+  static Future<List<dynamic>> getRunningProcesses() async {
+    try {
+      final List<dynamic> result = await platform.invokeMethod(
+        'getRunningProcesses',
+      );
+      return result;
+    } catch (e) {
+      print("Error getting processes: $e");
+      return [];
+    }
+  }
+
+  // [เพิ่ม] สั่งหยุดแอพ (Force Stop)
+  static Future<bool> forceStopApp(String packageName) async {
+    try {
+      // ใช้คำสั่ง am force-stop เพื่อหยุดแอพทันที
+      await runCommand("am force-stop $packageName");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static Future<bool> disableApp(String packageName) async {
+    try {
+      // ใช้คำสั่ง pm disable-user --user 0
+      await runCommand("pm disable-user --user 0 $packageName");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// สั่ง Enable แอพ (ปลดบล็อก)
+  static Future<bool> enableApp(String packageName) async {
+    try {
+      await runCommand("pm enable $packageName");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static Future<List<dynamic>> getDisabledApps() async {
+    try {
+      final List<dynamic> result = await platform.invokeMethod(
+        'getDisabledApps',
+      );
+      return result;
+    } catch (e) {
+      return [];
+    }
+  }
 }

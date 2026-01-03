@@ -4,6 +4,8 @@ import 'services/executor_service.dart';
 import 'utils/optimizer_logic.dart';
 import 'widgets/console_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'widgets/process_manager.dart';
+import 'widgets/disabled_apps.dart';
 
 void main() {
   runApp(const MyApp());
@@ -523,6 +525,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   "AOT Compile (Profile Mode)",
                   Icons.timer,
                   () => _runCompile("AOT Compile (Profile)", "speed-profile"),
+                ),
+                _buildSection("Task Manager"),
+                _buildBtn("Running Processes Manager", Icons.list_alt, () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ProcessManagerScreen(),
+                    ),
+                  );
+                }),
+                _buildBtn(
+                  "Blocked Apps Manager", // ชื่อปุ่ม
+                  Icons.phonelink_erase, // ไอคอน
+                  () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DisabledAppsScreen(),
+                      ),
+                    );
+                  },
                 ),
 
                 const SizedBox(height: 30),
