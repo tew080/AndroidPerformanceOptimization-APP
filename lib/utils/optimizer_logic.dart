@@ -298,4 +298,35 @@ class OptimizerLogic {
       'setprop debug.sf.vsp_trace false',
     ];
   }
+
+  static List<String> getJunkCleanerCommands() {
+    return [
+      "echo 'Analyzing storage...'",
+
+      // 1. สั่ง Android ให้ล้าง Cache ของระบบ (เทคนิค: สั่งให้คืนพื้นที่จำนวนมหาศาล ระบบจะลบ cache อัตโนมัติ)
+      "echo 'Trimming System Caches...'",
+      "pm trim-caches 999999M",
+
+      // 2. ลบ Cache ในหน่วยความจำภายนอก (Android 11+ เข้าถึงได้ด้วย Shizuku เท่านั้น)
+      "echo 'Cleaning External App Cache...'",
+      "rm -rf /sdcard/Android/data/*/cache/*",
+      "rm -rf /sdcard/Android/data/*/code_cache/*",
+
+      // 3. ลบไฟล์โฆษณาหรือ Cache ของบางแอพที่ชอบซ่อนไว้ (ระวังอย่าลบมั่ว)
+      "rm -rf /sdcard/Android/data/*/files/cache/*",
+      "rm -rf /sdcard/Android/data/*/files/tombstones/*",
+
+      // 4. ลบไฟล์ขยะชั่วคราวของระบบ
+      "echo 'Cleaning Temporary Files...'",
+      "rm -rf /data/local/tmp/*",
+
+      // 5. ลบ Log เก่าๆ ที่ทำให้เครื่องหนัก
+      "echo 'Cleaning System Logs...'",
+      "rm -rf /data/anr/*",
+      "rm -rf /data/tombstones/*",
+      "rm -rf /data/system/dropbox/*",
+
+      "echo '✅ Cleanup Complete!'",
+    ];
+  }
 }

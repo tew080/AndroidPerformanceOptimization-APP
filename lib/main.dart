@@ -509,10 +509,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   Icons.schedule,
                   () => _run("Bg Dex Opt", ["cmd package bg-dexopt-job"]),
                 ),
+
                 _buildBtn(
-                  "Bloatware Manager",
-                  Icons.delete_forever,
-                  _showBloatwareDialog,
+                  "Clean Junk & Cache",
+                  Icons.cleaning_services_outlined,
+                  // แก้ไขตรงนี้: ใช้ _run แทนการเรียก ExecutorService ตรงๆ
+                  () => _run(
+                    "Deep Cleaning...", // ข้อความที่จะโชว์หัวข้อใน Console
+                    OptimizerLogic.getJunkCleanerCommands(), // ชุดคำสั่งจากไฟล์ logic
+                  ),
                 ),
 
                 _buildSection("Compilation (High Performance)"),
@@ -526,7 +531,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Icons.timer,
                   () => _runCompile("AOT Compile (Profile)", "speed-profile"),
                 ),
-                _buildSection("Task Manager"),
+                _buildSection("APP & Task Manager"),
                 _buildBtn("Running Processes Manager", Icons.list_alt, () {
                   Navigator.push(
                     context,
@@ -546,6 +551,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   },
+                ),
+                _buildBtn(
+                  "Bloatware Manager",
+                  Icons.delete_forever,
+                  _showBloatwareDialog,
                 ),
 
                 const SizedBox(height: 30),
