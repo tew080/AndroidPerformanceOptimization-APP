@@ -575,19 +575,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
 
                 _buildSection("APP & Task Manager"),
-                _buildBtn(
-                  "Auto RAM Cleaner",
-                  Icons.autorenew, // แนะนำใช้ไอคอนนี้สื่อถึงการทำงานอัตโนมัติ
-                  () {
-                    // เปลี่ยนจาก _run เป็นการเปิดหน้าจอตั้งค่าแทน
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const AutoCleanScreen(),
-                      ),
-                    );
-                  },
-                ),
                 _buildBtn("Running Processes Manager", Icons.list_alt, () {
                   Navigator.push(
                     context,
@@ -630,7 +617,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 }),
 
                 _buildSection("Performance & Optimization"), // หัวข้อใหม่
-
                 _buildBtn(
                   "Game / App Booster", // ชื่อปุ่ม
                   Icons.rocket_launch, // ไอคอนรูปจรวด (สื่อถึงความเร็ว)
@@ -639,12 +625,26 @@ class _HomeScreenState extends State<HomeScreen> {
                       context,
                       MaterialPageRoute(
                         // ไปยังหน้าที่เราทำไว้ (หน้านี้จัดการ Logic เอง ไม่ต้องส่ง _run ก็ได้)
-                        builder: (context) => const PerformanceScreen(),
+                        builder: (context) => PerformanceScreen(onRun: _run),
                       ),
                     );
                   },
                 ),
 
+                _buildSection("Automate"),
+                _buildBtn(
+                  "Auto RAM Cleaner",
+                  Icons.autorenew, // แนะนำใช้ไอคอนนี้สื่อถึงการทำงานอัตโนมัติ
+                  () {
+                    // เปลี่ยนจาก _run เป็นการเปิดหน้าจอตั้งค่าแทน
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AutoCleanScreen(),
+                      ),
+                    );
+                  },
+                ),
                 const SizedBox(height: 30),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center, // จัดกึ่งกลาง
