@@ -1,11 +1,14 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_device_apps/flutter_device_apps.dart'; // Import เพื่อใช้ Class AppInfo
+import 'package:flutter_device_apps/flutter_device_apps.dart';
 import '../services/performance_service.dart';
 import '../utils/app_helper.dart';
 
 class PerformanceScreen extends StatefulWidget {
-  const PerformanceScreen({super.key});
+  // 1. เพิ่มตัวแปรรับฟังก์ชัน Callback แบบเดียวกับ NetworkPriorityScreen
+  final Function(String, List<String>) onRun;
+
+  const PerformanceScreen({super.key, required this.onRun});
 
   @override
   State<PerformanceScreen> createState() => _PerformanceScreenState();
@@ -13,15 +16,9 @@ class PerformanceScreen extends StatefulWidget {
 
 class _PerformanceScreenState extends State<PerformanceScreen> {
   Set<String> _selectedPackages = {};
-
-  // เก็บ List ของ Package Name แทน Object ก้อนใหญ่
   List<String> _allPackageNames = [];
-
-  // Cache สำหรับเก็บรูปที่โหลดเสร็จแล้ว
   final Map<String, Uint8List?> _iconCache = {};
-  // Cache สำหรับชื่อแอป (โหลดมารอไว้เลยเพราะ Text ไฟล์เล็ก โหลดเร็ว)
   final Map<String, String> _nameCache = {};
-
   String _searchQuery = "";
   bool _isLoading = true;
 
@@ -33,25 +30,16 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
 
   Future<void> _initData() async {
     setState(() => _isLoading = true);
-
     try {
-      // 1. โหลด List ที่เคย Boost ไว้
       final savedPackages = await PerformanceService.loadBoostedPackages();
-
-      // 2. โหลดรายชื่อแอป (ใช้ AppHelper ตัวใหม่)
-      // getInstalledApps() จะคืนค่า List<AppInfo> โดยยังไม่มี icon data (เร็ว)
       final List<AppInfo> apps = await AppHelper.getInstalledApps();
-
       final List<String> pkgList = [];
       final Map<String, String> nameMap = {};
 
       for (var app in apps) {
-        // เช็ค Null Safety ตามมาตรฐาน library ใหม่
         if (app.packageName != null) {
           final String pkg = app.packageName!;
-          // ถ้าไม่มีชื่อแอป ให้ใช้ package name แทน
           final String name = app.appName ?? pkg;
-
           pkgList.add(pkg);
           nameMap[pkg] = name;
         }
@@ -60,8 +48,8 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
       if (mounted) {
         setState(() {
           _selectedPackages = savedPackages;
-          _allPackageNames = pkgList; // เก็บแค่ List String
-          _nameCache.addAll(nameMap); // เก็บชื่อเข้า Cache เลย
+          _allPackageNames = pkgList;
+          _nameCache.addAll(nameMap);
           _isLoading = false;
         });
       }
@@ -71,12 +59,10 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     }
   }
 
-  // Lazy Load Icon: ดึงรูปเมื่อต้องแสดงผลเท่านั้น
   Future<Uint8List?> _getAppIconLazy(String packageName) async {
     if (_iconCache.containsKey(packageName)) {
       return _iconCache[packageName];
     }
-    // เรียกฟังก์ชันดึงรูปจาก AppHelper (ซึ่งเราแก้เป็น .iconBytes แล้ว)
     final icon = await AppHelper.getAppIcon(packageName);
     if (mounted && icon != null) {
       _iconCache[packageName] = icon;
@@ -84,42 +70,67 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
     return icon;
   }
 
+  // --- ส่วนที่แก้ไข Logic การทำงาน ---
   void _toggleAppSelection(String pkg, bool isSelected) async {
-    await PerformanceService.toggleAppBoost(pkg, isSelected, _selectedPackages);
-    setState(() {});
-
-    if (_selectedPackages.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("All optimizations stopped (Normal Mode)"),
-            backgroundColor: Colors.grey,
-            duration: Duration(seconds: 2),
-          ),
-        );
+    // 1. อัปเดต UI ทันที
+    setState(() {
+      if (isSelected) {
+        _selectedPackages.add(pkg);
+      } else {
+        _selectedPackages.remove(pkg);
       }
+    });
+
+    // 2. สร้างคำสั่ง Shell สำหรับแสดงใน Console
+    // (คุณสามารถปรับแต่งคำสั่งพวกนี้ตาม Logic จริงใน OptimizerLogic หรือ PerformanceService ได้)
+    List<String> commands = [];
+    String appName = _nameCache[pkg] ?? pkg;
+
+    if (isSelected) {
+      commands.add('echo ">>> Boosting $appName ($pkg)"');
+      commands.add('cmd package compile -m speed $pkg');
+      commands.add('am set-standby-bucket $pkg active');
+      commands.add('echo "Success: $appName is now boosted."');
+    } else {
+      commands.add('echo ">>> Resetting $appName"');
+      commands.add('cmd package compile -m verify $pkg');
+      commands.add('echo "Success: $appName returned to normal mode."');
+    }
+
+    // 3. เรียก callback onRun เพื่อเปิดหน้าต่าง Console
+    widget.onRun(isSelected ? "Boost: $appName" : "Reset: $appName", commands);
+
+    // 4. บันทึกค่าลง SharedPreferences (เรียก Service เดิม)
+    await PerformanceService.toggleAppBoost(pkg, isSelected, _selectedPackages);
+
+    if (_selectedPackages.isEmpty && !isSelected) {
+      // แจ้งเตือนเพิ่มเติมเมื่อไม่มีแอปเลือกแล้ว
     }
   }
 
   void _resetAll() async {
-    for (var pkg in _selectedPackages.toList()) {
-      await PerformanceService.unboostSpecificApp(pkg);
+    // สร้างคำสั่ง Reset ทั้งหมด
+    List<String> commands = [];
+    commands.add('echo ">>> Resetting All Performance Settings"');
+
+    for (var pkg in _selectedPackages) {
+      commands.add('cmd package compile -m verify $pkg');
     }
+    commands.add('echo "All apps reset to default compilation mode."');
+
+    // เรียก Console
+    widget.onRun("Reset All Boosters", commands);
+
+    // ล้างค่าในตัวแปรและ Service
     _selectedPackages.clear();
     await PerformanceService.disableSystemPerformanceMode();
-    // เรียก toggle แบบ dummy เพื่อให้มั่นใจว่า save state ล่าสุดแล้ว
+    // เรียก toggle dummy เพื่อ save state ว่าว่างเปล่า
     await PerformanceService.toggleAppBoost("dummy", false, _selectedPackages);
 
     setState(() {});
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Performance mode reset to Balanced")),
-      );
-    }
   }
+  // ------------------------------------
 
-  // Widget สร้าง Icon แบบ Asynchronous
   Widget _buildAppIcon(String pkg) {
     return FutureBuilder<Uint8List?>(
       future: _getAppIconLazy(pkg),
@@ -131,12 +142,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
             snapshot.data!,
             width: 35,
             height: 35,
-            gaplessPlayback: true, // ลดอาการกระพริบ
+            gaplessPlayback: true,
             errorBuilder: (context, error, stackTrace) =>
                 const Icon(Icons.android, size: 35, color: Colors.grey),
           );
         }
-        // ระหว่างรอโหลด หรือถ้าไม่มีรูป
         return const Icon(Icons.android, size: 35, color: Colors.green);
       },
     );
@@ -145,8 +155,6 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   @override
   Widget build(BuildContext context) {
     bool isSystemBoosted = _selectedPackages.isNotEmpty;
-
-    // Filter จาก _allPackageNames โดยใช้ชื่อจาก _nameCache
     final filteredPackages = _allPackageNames.where((pkg) {
       final name = (_nameCache[pkg] ?? "").toLowerCase();
       final query = _searchQuery.toLowerCase();
@@ -172,7 +180,7 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // --- 1. Status Card ---
+                // Status Card (คงเดิม)
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.all(12),
@@ -231,16 +239,11 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                           ],
                         ),
                       ),
-                      if (isSystemBoosted)
-                        const Badge(
-                          label: Text("ACTIVE"),
-                          backgroundColor: Colors.redAccent,
-                        ),
                     ],
                   ),
                 ),
 
-                // --- 2. Search Bar ---
+                // Search Bar (คงเดิม)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12.0),
                   child: TextField(
@@ -256,14 +259,13 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                     onChanged: (val) => setState(() => _searchQuery = val),
                   ),
                 ),
-
                 const SizedBox(height: 10),
 
-                // --- 3. List Item ---
+                // List Items (เรียก _toggleAppSelection ที่แก้แล้ว)
                 Expanded(
                   child: ListView.builder(
                     itemCount: filteredPackages.length,
-                    cacheExtent: 100, // ช่วยให้ scroll ลื่นขึ้น
+                    cacheExtent: 100,
                     itemBuilder: (context, index) {
                       final pkg = filteredPackages[index];
                       final name = _nameCache[pkg] ?? pkg;
@@ -282,7 +284,6 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
                         ),
                         child: CheckboxListTile(
                           activeColor: Colors.redAccent,
-                          // ใช้ Lazy Load Widget ที่เราสร้างไว้
                           secondary: _buildAppIcon(pkg),
                           title: Text(
                             name,
