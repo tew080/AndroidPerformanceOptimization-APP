@@ -1,11 +1,11 @@
 package com.example.apo
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,23 +13,21 @@ import io.flutter.plugin.common.MethodChannel
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import android.util.Log
-import android.app.ActivityManager
 
 class MainActivity : FlutterActivity() {
-    // ชื่อ Channel ต้องตรงกับฝั่ง Dart 100%
     private val CHANNEL = "com.example.optimizer/shizuku"
     private var currentProcess: Process? = null
+
+    // Cache รายชื่อ System Apps เพื่อลดการดึงข้อมูลซ้ำซ้อน
+    private var cachedSystemApps: Set<String>? = null
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Listener สำหรับผลการขอสิทธิ์ Shizuku
         Shizuku.addRequestPermissionResultListener { _, _ -> }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
-                // --- 1. ตรวจสอบสิทธิ์ Shizuku ---
                 "checkPermission" -> {
                     if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                         result.success(true)
@@ -41,10 +39,8 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // --- 2. ขอสิทธิ์แจ้งเตือน (Android 13+) [FIXED CODE] ---
                 "requestNotificationPermission" -> {
                     if (Build.VERSION.SDK_INT >= 33) {
-                        // ใช้ android.Manifest แบบเต็มยศ เพื่อแก้ปัญหา Unresolved reference
                         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
                             result.success(false)
@@ -56,7 +52,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // --- 3. รันคำสั่ง Shell ---
                 "runCommand" -> {
                     val command = call.argument<String>("command")
                     if (command != null) {
@@ -69,7 +64,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // --- 4. ยกเลิกคำสั่ง (Kill Process) ---
                 "cancelCommand" -> {
                     if (currentProcess != null) {
                         try {
@@ -84,18 +78,9 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // --- 5. จัดการ Background Service ---
                 "startService" -> {
                     val msg = call.argument<String>("message")
-                    val intent = Intent(this, OptimizationService::class.java).apply {
-                        putExtra("action", "start")
-                        putExtra("message", msg)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
-                    } else {
-                        startService(intent)
-                    }
+                    startOptimizationService("start", msg)
                     result.success(true)
                 }
 
@@ -117,7 +102,7 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
-                // [เพิ่ม case นี้] ดึงรายชื่อ Process และ RAM
+
                 "getRunningProcesses" -> {
                     Thread {
                         val processes = getProcessList()
@@ -134,12 +119,9 @@ class MainActivity : FlutterActivity() {
 
                 "startAutoCleaner" -> {
                     val threshold = call.argument<Int>("threshold") ?: 500
-
-                    // [เพิ่ม] บันทึกค่าลง Memory เครื่อง (SharedPreferences)
                     val prefs = getSharedPreferences("ApoPrefs", Context.MODE_PRIVATE)
                     prefs.edit().putInt("auto_ram_threshold", threshold).apply()
 
-                    // รัน Service ตามปกติ
                     val intent = Intent(this, OptimizationService::class.java).apply {
                         putExtra("action", "start_auto")
                         putExtra("threshold", threshold)
@@ -162,7 +144,6 @@ class MainActivity : FlutterActivity() {
 
                 "getAutoCleanerThreshold" -> {
                     val prefs = getSharedPreferences("ApoPrefs", Context.MODE_PRIVATE)
-                    // ค่า default 500 ถ้าไม่เคยตั้ง
                     val savedThreshold = prefs.getInt("auto_ram_threshold", 500)
                     result.success(savedThreshold)
                 }
@@ -184,35 +165,53 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // [เพิ่มฟังก์ชันนี้ต่อท้าย] อ่าน Process ด้วยคำสั่ง ps
-    private fun getProcessList(): List<Map<String, Any>> {
-        val list = mutableListOf<Map<String, Any>>()
+    private fun startOptimizationService(action: String, message: String? = null) {
+        val intent = Intent(this, OptimizationService::class.java).apply {
+            putExtra("action", action)
+            if (message != null) putExtra("message", message)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
 
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            return list
+    // Helper: โหลดรายชื่อ System Apps ครั้งเดียวแล้วเก็บไว้ (Optimize)
+    private fun getSystemApps(): Set<String> {
+        if (cachedSystemApps != null && cachedSystemApps!!.isNotEmpty()) {
+            return cachedSystemApps!!
         }
 
+        val systemApps = mutableSetOf<String>()
         try {
-            // 1. ดึงรายชื่อ System Package ทั้งหมดมาก่อน (เก็บใส่ Set เพื่อค้นหาเร็วๆ)
-            // คำสั่ง: pm list packages -s (s = system)
-            val systemApps = mutableSetOf<String>()
             val pPkg = Shizuku.newProcess(arrayOf("sh", "-c", "pm list packages -s"), null, null)
             val readerPkg = BufferedReader(InputStreamReader(pPkg.inputStream))
             var linePkg: String?
             while (readerPkg.readLine().also { linePkg = it } != null) {
-                // output จะเป็น "package:com.android.systemui" -> ตัด "package:" ออก
                 val pkg = linePkg!!.replace("package:", "").trim()
                 systemApps.add(pkg)
             }
             pPkg.waitFor()
+        } catch (e: Exception) {
+            Log.e("ApoSysApps", "Error loading system apps: ${e.message}")
+        }
+        cachedSystemApps = systemApps
+        return systemApps
+    }
 
-            // 2. ดึง Process ที่รันอยู่ (ps)
+    private fun getProcessList(): List<Map<String, Any>> {
+        val list = mutableListOf<Map<String, Any>>()
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) return list
+
+        try {
+            val systemApps = getSystemApps() // เรียกใช้ฟังก์ชันกลาง
+
             val p = Shizuku.newProcess(arrayOf("sh", "-c", "ps -A -o RSS,NAME"), null, null)
             val reader = BufferedReader(InputStreamReader(p.inputStream))
+            reader.readLine() // Skip Header
 
-            reader.readLine() // ข้าม Header
             var line: String?
-
             while (reader.readLine().also { line = it } != null) {
                 val l = line!!.trim()
                 val parts = l.split(Regex("\\s+"))
@@ -221,17 +220,10 @@ class MainActivity : FlutterActivity() {
                     val rssKb = parts[0].toLongOrNull() ?: 0L
                     val rawName = parts[1]
 
-                    // กรองเอาเฉพาะที่มี . (ว่าเป็นชื่อ package)
                     if (rawName.contains(".") && !rawName.startsWith("[")) {
-
-                        // ตัดชื่อหลัง : ออก (เช่น com.telegram.messenger:push -> com.telegram.messenger)
                         val pkgName = rawName.split(":")[0]
-
-                        // 3. ตรวจสอบ: ถ้าชื่อนี้อยู่ในรายการ System Apps ที่เราดึงมา -> คือ System
                         var isSystem = systemApps.contains(pkgName)
 
-                        // ข้อยกเว้น: แอพที่เป็นของ Google หรือ Android แต่ไม่อยู่ใน list (บางทีเป็น Service)
-                        // ให้เช็คจากชื่อเอา (กันเหนียว)
                         if (!isSystem) {
                             if (pkgName.startsWith("com.android.") || pkgName == "android") {
                                 isSystem = true
@@ -239,13 +231,14 @@ class MainActivity : FlutterActivity() {
                         }
 
                         if (rssKb > 0) {
-                            val map = mapOf(
-                                "pkg" to rawName,
-                                "ram_kb" to rssKb,
-                                "ram_mb" to (rssKb / 1024),
-                                "is_system" to isSystem // ส่งค่าที่ถูกต้อง 100%
+                            list.add(
+                                mapOf(
+                                    "pkg" to rawName,
+                                    "ram_kb" to rssKb,
+                                    "ram_mb" to (rssKb / 1024),
+                                    "is_system" to isSystem
+                                )
                             )
-                            list.add(map)
                         }
                     }
                 }
@@ -264,43 +257,23 @@ class MainActivity : FlutterActivity() {
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) return list
 
         try {
-            // 1. ดึงรายชื่อ System Apps ทั้งหมดไว้เทียบ (เหมือนเดิม)
-            val systemApps = mutableSetOf<String>()
-            val pSys = Shizuku.newProcess(arrayOf("sh", "-c", "pm list packages -s"), null, null)
-            val rSys = BufferedReader(InputStreamReader(pSys.inputStream))
-            var lSys: String?
-            while (rSys.readLine().also { lSys = it } != null) {
-                systemApps.add(lSys!!.replace("package:", "").trim())
-            }
-            pSys.waitFor()
+            val systemApps = getSystemApps() // เรียกใช้ฟังก์ชันกลาง
 
-            // 2. ดึงรายชื่อแอพที่ถูก Disable (pm list packages -d)
-            // -d = disabled only
             val p = Shizuku.newProcess(arrayOf("sh", "-c", "pm list packages -d"), null, null)
             val reader = BufferedReader(InputStreamReader(p.inputStream))
             var line: String?
 
             while (reader.readLine().also { line = it } != null) {
-                // output format: package:com.example.app
                 val pkg = line!!.replace("package:", "").trim()
-
                 if (pkg.isNotEmpty()) {
-                    // เช็คว่าเป็น System App หรือไม่
                     var isSystem = systemApps.contains(pkg)
                     if (!isSystem && (pkg.startsWith("com.android.") || pkg == "android")) {
                         isSystem = true
                     }
-
-                    list.add(
-                        mapOf(
-                            "pkg" to pkg,
-                            "is_system" to isSystem
-                        )
-                    )
+                    list.add(mapOf("pkg" to pkg, "is_system" to isSystem))
                 }
             }
             p.waitFor()
-            // เรียงตามตัวอักษร
             list.sortBy { it["pkg"] as String }
 
         } catch (e: Exception) {
@@ -309,7 +282,6 @@ class MainActivity : FlutterActivity() {
         return list
     }
 
-    // ฟังก์ชันรันคำสั่งผ่าน Shizuku
     private fun executeShizukuCommand(command: String): String {
         return try {
             currentProcess = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)

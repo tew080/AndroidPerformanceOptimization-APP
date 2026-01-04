@@ -1,6 +1,7 @@
 package com.example.apo
 
 import android.app.ActivityManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -21,17 +22,24 @@ class OptimizationService : Service() {
     private val CHANNEL_ID = "OptimizerChannel"
     private val NOTIFICATION_ID = 1
 
-    // ตัวแปรสำหรับ Auto Cleaner
+    // State Variables (แยกสถานะกัน)
     private var isAutoCleanEnabled = false
-    private var minRamThresholdMb = 500 // ค่า Default 500MB
-    private val handler = Handler(Looper.getMainLooper())
-    private val checkInterval = 10000L // เช็คทุกๆ 10 วินาที
+    private var isGeneralModeEnabled = false // สำหรับ Game Booster / Network Priority
 
-    // Loop ตรวจสอบ RAM
+    private var minRamThresholdMb = 500
+    private var currentGeneralMessage = "Optimization Active" // ข้อความของโหมดทั่วไป
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val checkInterval = 10000L // 10 วินาที
+
     private val cleanRunnable = object : Runnable {
         override fun run() {
             if (isAutoCleanEnabled) {
-                checkAndCleanRam()
+                try {
+                    checkAndCleanRam()
+                } catch (e: Exception) {
+                    Log.e("ApoService", "Error in loop: ${e.message}")
+                }
                 handler.postDelayed(this, checkInterval)
             }
         }
@@ -48,63 +56,94 @@ class OptimizationService : Service() {
         val action = intent?.getStringExtra("action")
 
         when (action) {
+            // --- Auto Clean Logic ---
             "start_auto" -> {
-                // เริ่มระบบ Auto Clean
                 val threshold = intent.getIntExtra("threshold", 500)
-                startAutoClean(threshold)
+                minRamThresholdMb = threshold
+                isAutoCleanEnabled = true
+
+                // เริ่ม Loop เช็ค RAM
+                handler.removeCallbacks(cleanRunnable)
+                handler.post(cleanRunnable)
+
+                updateServiceNotification()
             }
 
             "stop_auto" -> {
-                // หยุดระบบ Auto Clean
-                stopAutoClean()
+                isAutoCleanEnabled = false
+                handler.removeCallbacks(cleanRunnable)
+
+                // เช็คว่าจะปิด Service เลยไหม
+                checkAndStopSelf()
             }
 
+            // --- General Logic (Game Booster / Network) ---
             "start" -> {
-                // (โค้ดเดิม) start ปกติ
-                val msg = intent.getStringExtra("message") ?: "Running..."
-                startForeground(NOTIFICATION_ID, buildNotification(msg))
+                val msg = intent.getStringExtra("message") ?: "Optimizing..."
+                currentGeneralMessage = msg
+                isGeneralModeEnabled = true
+
+                updateServiceNotification()
+            }
+
+            "update" -> {
+                // อัปเดตข้อความเฉยๆ ไม่เปลี่ยนสถานะ
+                val msg = intent.getStringExtra("message") ?: currentGeneralMessage
+                currentGeneralMessage = msg
+                updateServiceNotification()
             }
 
             "stop" -> {
-                stopForeground(true)
-                stopSelf()
+                isGeneralModeEnabled = false
+                // เช็คว่าจะปิด Service เลยไหม
+                checkAndStopSelf()
             }
         }
 
         return START_STICKY
     }
 
-    private fun startAutoClean(threshold: Int) {
-        minRamThresholdMb = threshold
-        isAutoCleanEnabled = true
+    // ฟังก์ชันรวมข้อความ Notification และอัปเดต
+    private fun updateServiceNotification() {
+        val displayText = StringBuilder()
 
-        // เริ่ม Loop
-        handler.removeCallbacks(cleanRunnable)
-        handler.post(cleanRunnable)
+        if (isGeneralModeEnabled) {
+            displayText.append(currentGeneralMessage)
+        }
 
-        // อัปเดต Notification
-        val notif = buildNotification("Auto-RAM Cleaner Active (Threshold: ${threshold}MB)")
-        startForeground(NOTIFICATION_ID, notif)
+        if (isAutoCleanEnabled) {
+            if (displayText.isNotEmpty()) displayText.append(" | ")
+            displayText.append("Auto-Clean (<${minRamThresholdMb}MB)")
+        }
+
+        if (displayText.isEmpty()) {
+            displayText.append("Service Running...")
+        }
+
+        startForeground(NOTIFICATION_ID, buildNotification(displayText.toString()))
     }
 
-    private fun stopAutoClean() {
-        isAutoCleanEnabled = false
-        handler.removeCallbacks(cleanRunnable)
-        stopForeground(true)
-        stopSelf()
+    // ฟังก์ชันตัดสินใจว่าจะปิด Service หรือไม่
+    private fun checkAndStopSelf() {
+        // ถ้าทั้ง 2 โหมดปิดหมดแล้ว ค่อยทำลาย Service ทิ้ง
+        if (!isAutoCleanEnabled && !isGeneralModeEnabled) {
+            stopForeground(true)
+            stopSelf()
+        } else {
+            // ถ้ายังมีอย่างใดอย่างหนึ่งเปิดอยู่ ให้อัปเดต Notification แทน
+            updateServiceNotification()
+        }
     }
 
-    // --- ฟังก์ชันตรวจสอบและล้าง RAM ---
+    // --- Logic การเช็ค RAM (เหมือนเดิมที่แก้แล้ว) ---
     private fun checkAndCleanRam() {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val mi = ActivityManager.MemoryInfo()
         am.getMemoryInfo(mi)
 
         val availMb = mi.availMem / 1024 / 1024
-        // Log.d("ApoAuto", "RAM Check: ${availMb}MB / Threshold: ${minRamThresholdMb}MB")
-
         if (availMb < minRamThresholdMb) {
-            Log.d("ApoAuto", "RAM Low! Triggering cleanup...")
+            Log.d("ApoAuto", "RAM Low detected! Triggering cleanup...")
             performCleanup()
         }
     }
@@ -112,8 +151,7 @@ class OptimizationService : Service() {
     private fun performCleanup() {
         Thread {
             try {
-                // 1. หา Top App (แอพที่เปิดอยู่) ผ่าน Shizuku
-                // ใช้คำสั่ง dumpsys activity เพื่อหา ResumedActivity
+                // 1. หา Top App
                 val p = Shizuku.newProcess(
                     arrayOf("sh", "-c", "dumpsys activity activities | grep mResumedActivity"),
                     null,
@@ -123,55 +161,52 @@ class OptimizationService : Service() {
                 var line: String?
                 var topAppPackage = ""
 
-                // Output example: mResumedActivity: ActivityRecord{... u0 com.pubg.imobile/...}
                 while (reader.readLine().also { line = it } != null) {
-                    if (line!!.contains("u0 ")) {
-                        val parts = line!!.split("u0 ")[1].split("/")
-                        if (parts.isNotEmpty()) {
-                            topAppPackage = parts[0].trim()
-                            break
+                    val safeLine = line ?: continue
+                    if (safeLine.contains("u0 ") && safeLine.contains("/")) {
+                        try {
+                            val afterU0 = safeLine.substringAfter("u0 ")
+                            val component = afterU0.substringBefore(" ")
+                            topAppPackage = component.substringBefore("/")
+                            if (topAppPackage.isNotEmpty()) break
+                        } catch (e: Exception) {
+                            Log.e("ApoAuto", "Parse error: ${e.message}")
                         }
                     }
                 }
                 p.waitFor()
 
-                Log.d("ApoAuto", "Top App Detected: $topAppPackage")
+                if (topAppPackage.isEmpty()) return@Thread
 
-                // 2. ดึงรายการแอพทั้งหมด แล้วสั่ง Kill (ยกเว้น Top App และ ตัวเอง)
-                val myPackage = packageName // com.example.apo
-
-                // ดึงรายการ process
+                // 2. ฆ่า Process อื่นๆ
+                val myPackage = packageName
                 val pList = Shizuku.newProcess(arrayOf("sh", "-c", "ps -A -o NAME"), null, null)
                 val rList = BufferedReader(InputStreamReader(pList.inputStream))
+                rList.readLine() // skip header
 
-                // ข้าม header
-                rList.readLine()
-
-                val killedApps = mutableListOf<String>()
+                val killCommands = StringBuilder()
+                var count = 0
 
                 while (rList.readLine().also { line = it } != null) {
-                    val pkg = line!!.trim()
-
-                    // เงื่อนไขการฆ่า:
-                    // 1. ต้องเป็นชื่อ package (มีจุด)
-                    // 2. ไม่ใช่ Top App
-                    // 3. ไม่ใช่ App ตัวเอง
-                    // 4. ไม่ใช่ System UI (กันพลาด)
+                    val pkg = line?.trim() ?: continue
                     if (pkg.contains(".") &&
                         pkg != topAppPackage &&
                         pkg != myPackage &&
-                        pkg != "com.android.systemui"
+                        pkg != "com.android.systemui" &&
+                        !pkg.startsWith("com.google.android.inputmethod")
                     ) {
-
-                        Shizuku.newProcess(arrayOf("sh", "-c", "am force-stop $pkg"), null, null).waitFor()
-                        killedApps.add(pkg)
+                        killCommands.append("am force-stop $pkg\n")
+                        count++
                     }
                 }
+                pList.waitFor()
 
-                Log.d("ApoAuto", "Cleaned ${killedApps.size} apps. Saved RAM for $topAppPackage")
-
-                // (Optional) ส่งเสียงหรือแจ้งเตือนว่าเคลียร์แล้ว
-                // updateNotification("Cleaned RAM for $topAppPackage")
+                if (killCommands.isNotEmpty()) {
+                    if (killCommands.length <= 100000) {
+                        Shizuku.newProcess(arrayOf("sh", "-c", killCommands.toString()), null, null).waitFor()
+                        Log.d("ApoAuto", "Batch cleaned $count apps.")
+                    }
+                }
 
             } catch (e: Exception) {
                 Log.e("ApoAuto", "Error cleaning: ${e.message}")
@@ -179,8 +214,7 @@ class OptimizationService : Service() {
         }.start()
     }
 
-    // ... (ส่วน buildNotification และ createNotificationChannel เดิม เก็บไว้เหมือนเดิม) ...
-    private fun buildNotification(text: String): android.app.Notification {
+    private fun buildNotification(text: String): Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Android Optimizer")
             .setContentText(text)
@@ -188,16 +222,13 @@ class OptimizationService : Service() {
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setShowWhen(false)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE) // เพิ่มบรรทัดนี้เพื่อลดการหน่วง
         return builder.build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Optimization Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel = NotificationChannel(CHANNEL_ID, "Optimization Service", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
