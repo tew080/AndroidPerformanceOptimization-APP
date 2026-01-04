@@ -1,5 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/shizuku_service.dart';
+import '../utils/app_helper.dart';
 
 class ProcessManagerScreen extends StatefulWidget {
   const ProcessManagerScreen({super.key});
@@ -9,102 +11,116 @@ class ProcessManagerScreen extends StatefulWidget {
 }
 
 class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
-  List<dynamic> _processes = [];
+  List<dynamic> _allProcesses = [];
+  List<dynamic> _filteredProcesses = [];
+  Map<String, Uint8List?> _appIcons = {};
+  Map<String, String> _appNames = {};
+  String _searchQuery = "";
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadProcesses();
+    _loadData();
   }
 
-  Future<void> _loadProcesses() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    final list = await ShizukuService.getRunningProcesses();
+
+    // 1. Get processes from Shizuku
+    final processList = await ShizukuService.getRunningProcesses();
+
+    // 2. Get App Info (Icons & Names) from system
+    final installedApps = await AppHelper.getInstalledAppsWithIcons();
+    final Map<String, Uint8List?> iconMap = {};
+    final Map<String, String> nameMap = {};
+
+    for (var app in installedApps) {
+      if (app.packageName != null) {
+        iconMap[app.packageName!] = app.icon;
+        nameMap[app.packageName!] = app.name ?? app.packageName!;
+      }
+    }
+
     if (mounted) {
       setState(() {
-        _processes = list;
+        _allProcesses = processList;
+        _appIcons = iconMap;
+        _appNames = nameMap;
+        _filterProcesses(_searchQuery);
         _isLoading = false;
       });
     }
   }
 
-  // ฟังก์ชันจัดการแอพ (Kill หรือ Block)
-  Future<void> _manageApp(
-    String pkgName,
-    String ram,
-    bool isSystem,
-    String action,
-  ) async {
-    // กำหนดข้อความเตือนตาม Action
-    String titleText = "";
-    String contentText = "";
-    Color confirmColor = Colors.red;
-    String btnLabel = "";
+  void _filterProcesses(String query) {
+    setState(() {
+      _searchQuery = query;
+      _filteredProcesses = _allProcesses.where((process) {
+        final pkg = (process['pkg'] as String).toLowerCase();
+        final name = (_appNames[pkg] ?? "").toLowerCase();
+        return pkg.contains(query.toLowerCase()) ||
+            name.contains(query.toLowerCase());
+      }).toList();
+    });
+  }
 
-    if (action == 'kill') {
-      titleText = "Force Stop (Kill)";
-      contentText = "Stop running process '$pkgName'?\n(App can auto-restart)";
-      btnLabel = "Kill";
-    } else if (action == 'block') {
-      titleText = "Block / Disable App 🚫";
-      contentText =
-          "This will DISABLE '$pkgName'.\n\n"
-          "• App will vanish from app drawer.\n"
-          "• It CANNOT auto-run anymore.\n"
-          "• You must enable it back to use it.";
-      btnLabel = "Block Forever";
+  Widget _buildAppIcon(String pkgName, bool isSystem) {
+    final iconBytes = _appIcons[pkgName];
+    if (iconBytes != null && iconBytes.isNotEmpty) {
+      return Image.memory(iconBytes, width: 32, height: 32);
     }
+    return Icon(
+      isSystem ? Icons.settings_suggest : Icons.android,
+      color: isSystem ? Colors.redAccent : Colors.greenAccent,
+      size: 28,
+    );
+  }
 
-    // ถ้าเป็น System App ต้องเตือนหนักๆ
-    if (isSystem) {
-      titleText = "⚠️ SYSTEM WARNING";
-      confirmColor = Colors.red;
-      contentText =
-          "WARNING: '$pkgName' is a SYSTEM APP.\n\n"
-          "${action == 'block' ? 'BLOCKING' : 'STOPPING'} it may cause bootloop or crash!\n"
-          "Do not proceed unless you know what you are doing.";
-    }
+  Future<void> _manageApp(String pkgName, bool isSystem, String action) async {
+    String titleText = action == 'kill' ? "Force Stop" : "Disable App";
+    String appLabel = _appNames[pkgName] ?? pkgName;
 
-    // Show Dialog
     bool? confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(
-          titleText,
-          style: TextStyle(color: isSystem ? Colors.red : Colors.white),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Text(isSystem ? "⚠️ System Warning" : titleText),
+        content: Text(
+          "Do you want to $action '$appLabel'?\n${isSystem ? 'This might cause system instability.' : ''}",
         ),
-        content: Text(contentText),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: confirmColor),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isSystem ? Colors.red : Colors.blue,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(btnLabel, style: const TextStyle(color: Colors.white)),
+            child: Text(
+              action.toUpperCase(),
+              style: const TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
     );
 
     if (confirm == true) {
-      bool success = false;
-      if (action == 'kill') {
-        success = await ShizukuService.forceStopApp(pkgName);
-      } else if (action == 'block') {
-        success = await ShizukuService.disableApp(pkgName);
-      }
+      bool success = action == 'kill'
+          ? await ShizukuService.forceStopApp(pkgName)
+          : await ShizukuService.disableApp(pkgName);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(success ? "Success: $action $pkgName" : "Failed"),
-            backgroundColor: success ? Colors.green : Colors.red,
+            content: Text(success ? "Success" : "Failed"),
+            behavior: SnackBarBehavior.floating,
           ),
         );
-        _loadProcesses(); // Refresh list
+        _loadData();
       }
     }
   }
@@ -115,116 +131,90 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
       appBar: AppBar(
         title: const Text("Task Manager"),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadProcesses,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
         ],
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
-            )
-          : _processes.isEmpty
-          ? const Center(child: Text("No running apps found"))
-          : ListView.builder(
-              itemCount: _processes.length,
-              itemBuilder: (context, index) {
-                final item = _processes[index];
-                final pkg = item['pkg'] as String;
-                final ram = item['ram_mb'] as int;
-                final bool isSystem = item['is_system'] ?? false;
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: "Search apps or packages...",
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey.withOpacity(0.05),
+                    ),
+                    onChanged: _filterProcesses,
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _filteredProcesses.length,
+                    itemBuilder: (context, index) {
+                      final item = _filteredProcesses[index];
+                      final pkg = item['pkg'] as String;
+                      final ram = item['ram_mb'] as int;
+                      final bool isSystem = item['is_system'] ?? false;
+                      final appName = _appNames[pkg] ?? pkg;
 
-                return Card(
-                  color: const Color(0xFF1E1E1E),
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  shape: isSystem
-                      ? RoundedRectangleBorder(
-                          side: const BorderSide(
-                            color: Colors.redAccent,
-                            width: 1,
-                          ),
-                          borderRadius: BorderRadius.circular(10),
-                        )
-                      : null,
-                  child: ListTile(
-                    leading: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          isSystem ? Icons.android_outlined : Icons.person,
-                          color: isSystem
-                              ? Colors.redAccent
-                              : Colors.greenAccent,
-                          size: 28,
+                      return Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          isSystem ? "SYS" : "USER",
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E1E1E),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
                             color: isSystem
-                                ? Colors.redAccent
-                                : Colors.greenAccent,
+                                ? Colors.redAccent.withOpacity(0.2)
+                                : Colors.white10,
                           ),
                         ),
-                      ],
-                    ),
-                    title: Text(
-                      pkg,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      "$ram MB",
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                    // เปลี่ยนปุ่ม Kill เป็น Menu (3 จุด)
-                    trailing: PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert, color: Colors.white70),
-                      onSelected: (value) {
-                        if (value == 'kill') {
-                          _manageApp(pkg, ram.toString(), isSystem, 'kill');
-                        } else if (value == 'block') {
-                          _manageApp(pkg, ram.toString(), isSystem, 'block');
-                        }
-                      },
-                      itemBuilder: (BuildContext context) =>
-                          <PopupMenuEntry<String>>[
-                            // เมนู 1: Kill
-                            const PopupMenuItem<String>(
-                              value: 'kill',
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.stop_circle_outlined,
-                                    color: Colors.orange,
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text('Force Stop (Temp)'),
-                                ],
-                              ),
+                        child: ListTile(
+                          leading: _buildAppIcon(pkg, isSystem),
+                          title: Text(
+                            appName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
                             ),
-                            // เมนู 2: Block
-                            const PopupMenuItem<String>(
-                              value: 'block',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.block, color: Colors.redAccent),
-                                  SizedBox(width: 8),
-                                  Text('Block / Disable (Forever)'),
-                                ],
-                              ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            "$pkg\nRAM: $ram MB",
+                            style: const TextStyle(
+                              color: Colors.grey,
+                              fontSize: 10,
                             ),
-                          ],
-                    ),
+                          ),
+                          isThreeLine: true,
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (val) => _manageApp(pkg, isSystem, val),
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: 'kill',
+                                child: Text("Force Stop"),
+                              ),
+                              const PopupMenuItem(
+                                value: 'block',
+                                child: Text("Disable App"),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+              ],
             ),
     );
   }
