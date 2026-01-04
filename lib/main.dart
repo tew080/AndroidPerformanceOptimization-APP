@@ -9,6 +9,7 @@ import 'widgets/disabled_apps.dart';
 import 'widgets/auto_clean.dart';
 import 'widgets/dns.dart';
 import 'widgets/network_priority.dart';
+import 'widgets/priority_mode.dart';
 
 void main() {
   runApp(const MyApp());
@@ -627,6 +628,22 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   );
                 }),
+
+                _buildSection("Performance & Optimization"), // หัวข้อใหม่
+
+                _buildBtn(
+                  "Game / App Booster", // ชื่อปุ่ม
+                  Icons.rocket_launch, // ไอคอนรูปจรวด (สื่อถึงความเร็ว)
+                  () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        // ไปยังหน้าที่เราทำไว้ (หน้านี้จัดการ Logic เอง ไม่ต้องส่ง _run ก็ได้)
+                        builder: (context) => const PerformanceScreen(),
+                      ),
+                    );
+                  },
+                ),
 
                 const SizedBox(height: 30),
                 Row(
