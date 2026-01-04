@@ -1,5 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../services/shizuku_service.dart';
+import '../utils/app_helper.dart';
 
 class DisabledAppsScreen extends StatefulWidget {
   const DisabledAppsScreen({super.key});
@@ -9,7 +11,11 @@ class DisabledAppsScreen extends StatefulWidget {
 }
 
 class _DisabledAppsScreenState extends State<DisabledAppsScreen> {
-  List<dynamic> _disabledApps = [];
+  List<dynamic> _allDisabledApps = [];
+  List<dynamic> _filteredApps = [];
+  Map<String, Uint8List?> _appIcons = {};
+  Map<String, String> _appNames = {};
+  String _searchQuery = "";
   bool _isLoading = true;
 
   @override
@@ -21,22 +27,48 @@ class _DisabledAppsScreenState extends State<DisabledAppsScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     final list = await ShizukuService.getDisabledApps();
+    final installedApps = await AppHelper.getInstalledAppsWithIcons();
+
+    final Map<String, Uint8List?> iconMap = {};
+    final Map<String, String> nameMap = {};
+
+    for (var app in installedApps) {
+      if (app.packageName != null) {
+        iconMap[app.packageName!] = app.icon;
+        nameMap[app.packageName!] = app.name ?? app.packageName!;
+      }
+    }
+
     if (mounted) {
       setState(() {
-        _disabledApps = list;
+        _allDisabledApps = list;
+        _appIcons = iconMap;
+        _appNames = nameMap;
+        _filterApps(_searchQuery);
         _isLoading = false;
       });
     }
   }
 
+  void _filterApps(String query) {
+    setState(() {
+      _searchQuery = query;
+      _filteredApps = _allDisabledApps.where((app) {
+        final pkg = (app['pkg'] as String).toLowerCase();
+        final name = (_appNames[pkg] ?? "").toLowerCase();
+        return pkg.contains(query.toLowerCase()) ||
+            name.contains(query.toLowerCase());
+      }).toList();
+    });
+  }
+
   Future<void> _enableApp(String pkgName) async {
+    String appLabel = _appNames[pkgName] ?? pkgName;
     bool? confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Enable App?"),
-        content: Text(
-          "Restore '$pkgName'?\nIt will appear on your launcher again.",
-        ),
+        title: const Text("Restore App"),
+        content: Text("Do you want to enable '$appLabel' again?"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -51,97 +83,79 @@ class _DisabledAppsScreenState extends State<DisabledAppsScreen> {
     );
 
     if (confirm == true) {
-      bool success = await ShizukuService.enableApp(pkgName);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(success ? "Enabled $pkgName" : "Failed"),
-            backgroundColor: success ? Colors.green : Colors.red,
-          ),
-        );
-        _loadData(); // รีเฟรชรายการ
-      }
+      await ShizukuService.enableApp(pkgName);
+      _loadData();
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Blocked Apps (Disabled)"),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
-        ],
-      ),
+      appBar: AppBar(title: const Text("Blocked Apps")),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.greenAccent),
-            )
-          : _disabledApps.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.check_circle_outline,
-                    size: 64,
-                    color: Colors.grey,
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: "Search blocked apps...",
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onChanged: _filterApps,
                   ),
-                  SizedBox(height: 16),
-                  Text(
-                    "No blocked apps found",
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              itemCount: _disabledApps.length,
-              itemBuilder: (context, index) {
-                final item = _disabledApps[index];
-                final pkg = item['pkg'] as String;
-                final bool isSystem = item['is_system'] ?? false;
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _filteredApps.length,
+                    itemBuilder: (context, index) {
+                      final pkg = _filteredApps[index]['pkg'];
+                      final isSystem =
+                          _filteredApps[index]['is_system'] ?? false;
+                      final appName = _appNames[pkg] ?? pkg;
 
-                return Card(
-                  color: const Color(0xFF1E1E1E),
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        color: const Color(0xFF1E1E1E),
+                        child: ListTile(
+                          leading: _appIcons[pkg] != null
+                              ? Image.memory(_appIcons[pkg]!, width: 32)
+                              : const Icon(Icons.block, color: Colors.grey),
+                          title: Text(
+                            appName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                          subtitle: Text(
+                            pkg,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(
+                              Icons.settings_backup_restore,
+                              color: Colors.greenAccent,
+                            ),
+                            onPressed: () => _enableApp(pkg),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.block, // ไอคอนโดนบล็อก
-                      color: isSystem
-                          ? Colors.red.withOpacity(0.7)
-                          : Colors.grey,
-                    ),
-                    title: Text(
-                      pkg,
-                      style: TextStyle(
-                        color: Colors.white70,
-                        decoration: TextDecoration
-                            .lineThrough, // ขีดฆ่าชื่อให้รู้ว่าใช้ไม่ได้
-                      ),
-                    ),
-                    subtitle: Text(
-                      isSystem ? "System App" : "User App",
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isSystem ? Colors.redAccent : Colors.greenAccent,
-                      ),
-                    ),
-                    trailing: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.withOpacity(0.2),
-                        foregroundColor: Colors.greenAccent,
-                      ),
-                      onPressed: () => _enableApp(pkg),
-                      icon: const Icon(Icons.settings_backup_restore, size: 18),
-                      label: const Text("Enable"),
-                    ),
-                  ),
-                );
-              },
+                ),
+              ],
             ),
     );
   }
