@@ -13,8 +13,12 @@ class ProcessManagerScreen extends StatefulWidget {
 class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
   List<dynamic> _allProcesses = [];
   List<dynamic> _filteredProcesses = [];
-  Map<String, Uint8List?> _appIcons = {};
-  Map<String, String> _appNames = {};
+
+  // Cache สำหรับเก็บรูปที่โหลดเสร็จแล้ว เพื่อลดการทำงานซ้ำ
+  final Map<String, Uint8List?> _iconCache = {};
+  // Cache สำหรับชื่อแอป
+  final Map<String, String> _nameCache = {};
+
   String _searchQuery = "";
   bool _isLoading = true;
 
@@ -25,31 +29,26 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
-    // 1. Get processes from Shizuku
-    final processList = await ShizukuService.getRunningProcesses();
+    try {
+      // 1. ดึงเฉพาะ Process ที่รันอยู่ (เร็วมาก ไม่ค้างแน่นอน)
+      final processList = await ShizukuService.getRunningProcesses();
 
-    // 2. Get App Info (Icons & Names) from system
-    final installedApps = await AppHelper.getInstalledAppsWithIcons();
-    final Map<String, Uint8List?> iconMap = {};
-    final Map<String, String> nameMap = {};
+      // OPTIONAL: ถ้าอยากโหลดชื่อแอปมารอไว้ก่อน (เฉพาะแอปที่รันอยู่ ไม่ใช่ทั้งเครื่อง)
+      // คุณอาจจะเขียน Logic เพิ่มตรงนี้ได้ แต่ถ้าเอาเร็ว ปล่อยว่างไว้แล้วโหลด Lazy เอา
 
-    for (var app in installedApps) {
-      if (app.packageName != null) {
-        iconMap[app.packageName!] = app.icon;
-        nameMap[app.packageName!] = app.name ?? app.packageName!;
+      if (mounted) {
+        setState(() {
+          _allProcesses = processList;
+          _filterProcesses(_searchQuery);
+          _isLoading = false;
+        });
       }
-    }
-
-    if (mounted) {
-      setState(() {
-        _allProcesses = processList;
-        _appIcons = iconMap;
-        _appNames = nameMap;
-        _filterProcesses(_searchQuery);
-        _isLoading = false;
-      });
+    } catch (e) {
+      debugPrint("Error loading processes: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -58,28 +57,66 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
       _searchQuery = query;
       _filteredProcesses = _allProcesses.where((process) {
         final pkg = (process['pkg'] as String).toLowerCase();
-        final name = (_appNames[pkg] ?? "").toLowerCase();
+        // ค้นหาจากชื่อที่แคชไว้ หรือถ้าไม่มีก็หาจาก package name
+        final name = (_nameCache[pkg] ?? "").toLowerCase();
         return pkg.contains(query.toLowerCase()) ||
             name.contains(query.toLowerCase());
       }).toList();
     });
   }
 
-  Widget _buildAppIcon(String pkgName, bool isSystem) {
-    final iconBytes = _appIcons[pkgName];
-    if (iconBytes != null && iconBytes.isNotEmpty) {
-      return Image.memory(iconBytes, width: 32, height: 32);
+  // ฟังก์ชันดึงรูปทีละตัว (Lazy Load)
+  Future<Uint8List?> _getAppIconLazy(String packageName) async {
+    if (_iconCache.containsKey(packageName)) {
+      return _iconCache[packageName];
     }
-    return Icon(
-      isSystem ? Icons.settings_suggest : Icons.android,
-      color: isSystem ? Colors.redAccent : Colors.greenAccent,
-      size: 28,
+    // *** สำคัญ: ต้องไปเพิ่มฟังก์ชัน getAppIcon ใน AppHelper ***
+    final icon = await AppHelper.getAppIcon(packageName);
+    _iconCache[packageName] = icon;
+    return icon;
+  }
+
+  // ฟังก์ชันดึงชื่อทีละตัว (Lazy Load)
+  Future<String> _getAppNameLazy(String packageName) async {
+    if (_nameCache.containsKey(packageName)) {
+      return _nameCache[packageName]!;
+    }
+    // *** สำคัญ: ต้องไปเพิ่มฟังก์ชัน getAppName ใน AppHelper ***
+    final name = await AppHelper.getAppName(packageName);
+    _nameCache[packageName] = name;
+    return name;
+  }
+
+  Widget _buildAppIcon(String pkgName, bool isSystem) {
+    // ใช้ FutureBuilder เพื่อโหลดรูปแยกต่างหาก ไม่ขวาง UI หลัก
+    return FutureBuilder<Uint8List?>(
+      future: _getAppIconLazy(pkgName),
+      builder: (context, snapshot) {
+        if (snapshot.hasData &&
+            snapshot.data != null &&
+            snapshot.data!.isNotEmpty) {
+          return Image.memory(
+            snapshot.data!,
+            width: 32,
+            height: 32,
+            gaplessPlayback: true,
+          );
+        }
+        // ระหว่างโหลด หรือถ้าไม่มีรูป ให้แสดง Icon
+        return Icon(
+          isSystem ? Icons.settings_suggest : Icons.android,
+          color: isSystem
+              ? Colors.redAccent.withOpacity(0.5)
+              : Colors.greenAccent.withOpacity(0.5),
+          size: 28,
+        );
+      },
     );
   }
 
   Future<void> _manageApp(String pkgName, bool isSystem, String action) async {
     String titleText = action == 'kill' ? "Force Stop" : "Disable App";
-    String appLabel = _appNames[pkgName] ?? pkgName;
+    String appLabel = _nameCache[pkgName] ?? pkgName;
 
     bool? confirm = await showDialog(
       context: context,
@@ -120,7 +157,7 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
             behavior: SnackBarBehavior.floating,
           ),
         );
-        _loadData();
+        _loadData(); // Reload list
       }
     }
   }
@@ -156,12 +193,13 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
                 Expanded(
                   child: ListView.builder(
                     itemCount: _filteredProcesses.length,
+                    // optimization: กำหนด cacheExtent เพื่อให้โหลดรูปรอไว้ล่วงหน้าเล็กน้อยตอนไถหน้าจอ
+                    cacheExtent: 100,
                     itemBuilder: (context, index) {
                       final item = _filteredProcesses[index];
                       final pkg = item['pkg'] as String;
                       final ram = item['ram_mb'] as int;
                       final bool isSystem = item['is_system'] ?? false;
-                      final appName = _appNames[pkg] ?? pkg;
 
                       return Container(
                         margin: const EdgeInsets.symmetric(
@@ -179,14 +217,22 @@ class _ProcessManagerScreenState extends State<ProcessManagerScreen> {
                         ),
                         child: ListTile(
                           leading: _buildAppIcon(pkg, isSystem),
-                          title: Text(
-                            appName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                          title: FutureBuilder<String>(
+                            // โหลดชื่อแบบ Lazy เหมือนกัน
+                            future: _getAppNameLazy(pkg),
+                            initialData:
+                                pkg, // โชว์ pkg name ไปก่อนระหว่างรอชื่อจริง
+                            builder: (context, snapshot) {
+                              return Text(
+                                snapshot.data ?? pkg,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            },
                           ),
                           subtitle: Text(
                             "$pkg\nRAM: $ram MB",
