@@ -133,7 +133,7 @@ class _AutoCleanScreenState extends State<AutoCleanScreen> {
             Slider(
               value: _threshold,
               min: 100,
-              max: 5000,
+              max: 1000,
               divisions: 19,
               activeColor: Colors.greenAccent,
               label: "${_threshold.toInt()} MB",
