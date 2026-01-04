@@ -8,6 +8,7 @@ import 'widgets/process_manager.dart';
 import 'widgets/disabled_apps.dart';
 import 'widgets/auto_clean.dart';
 import 'widgets/dns.dart';
+import 'widgets/network_priority.dart';
 
 void main() {
   runApp(const MyApp());
@@ -618,6 +619,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   Icons.security,
                   () => DnsDialog.show(context, _run),
                 ),
+                _buildBtn("Network Priority", Icons.speed, () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => NetworkPriorityScreen(onRun: _run),
+                    ),
+                  );
+                }),
 
                 const SizedBox(height: 30),
                 Row(
