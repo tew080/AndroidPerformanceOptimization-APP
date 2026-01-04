@@ -350,8 +350,6 @@ class OptimizerLogic {
       "rm -rf /data/anr/*",
       "rm -rf /data/tombstones/*",
       "rm -rf /data/system/dropbox/*",
-
-      "echo '✅ Cleanup Complete!'",
     ];
   }
 
