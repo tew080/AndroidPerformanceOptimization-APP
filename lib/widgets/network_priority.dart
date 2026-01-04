@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter_device_apps/flutter_device_apps.dart'; // Import เพื่อใช้ Class AppInfo
+import 'package:flutter_device_apps/flutter_device_apps.dart';
 import '../utils/optimizer_logic.dart';
 import '../utils/app_helper.dart';
 
@@ -25,28 +25,23 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
   final Map<String, Uint8List?> _iconCache = {};
 
   String searchQuery = "";
-  Set<String> _selectedPkgs = {};
+  // เราใช้ activePriorityPkgs ของ widget โดยตรงเพื่อให้สถานะตรงกันเสมอ
   bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    // ดึงค่าเก่าที่เคย Active ไว้มาแสดงผล
-    _selectedPkgs = Set.from(NetworkPriorityScreen.activePriorityPkgs);
     _loadApps();
   }
 
-  // 1. โหลดข้อมูลรายชื่อแอป (เอาแค่ชื่อกับ pkg ยังไม่เอารูป)
+  // 1. โหลดข้อมูลรายชื่อแอป
   Future<void> _loadApps() async {
     try {
-      // เรียกใช้ AppHelper ตัวใหม่ (คืนค่าเป็น List<AppInfo>)
       final List<AppInfo> apps = await AppHelper.getInstalledApps();
-
       final List<String> pkgList = [];
       final Map<String, String> nameMap = {};
 
       for (var app in apps) {
-        // เช็ค null ตามมาตรฐานใหม่
         if (app.packageName != null) {
           final String pkg = app.packageName!;
           final String name = app.appName ?? pkg;
@@ -74,7 +69,6 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
     if (_iconCache.containsKey(packageName)) {
       return _iconCache[packageName];
     }
-    // เรียก Helper ที่เราแก้เป็น .iconBytes แล้ว
     final icon = await AppHelper.getAppIcon(packageName);
     if (mounted && icon != null) {
       _iconCache[packageName] = icon;
@@ -104,14 +98,52 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
     );
   }
 
+  // --- LOGIC หลัก: ติ๊กปุ๊บ สั่งทำงานปั๊บ ---
   void _toggleSelection(String pkg, bool isSelected) {
     setState(() {
       if (isSelected) {
-        _selectedPkgs.add(pkg);
+        NetworkPriorityScreen.activePriorityPkgs.add(pkg);
       } else {
-        _selectedPkgs.remove(pkg);
+        NetworkPriorityScreen.activePriorityPkgs.remove(pkg);
       }
     });
+
+    // เตรียมชื่อสำหรับแจ้งเตือน (SnackBar)
+    final String appName = _nameCache[pkg] ?? pkg;
+    final String msg = isSelected
+        ? "Added priority to $appName"
+        : "Removed priority from $appName";
+
+    // สั่งรันคำสั่งทันที!
+    // เราส่ง List ทั้งหมดไปใหม่ทุกครั้งเพื่อให้แน่ใจว่า Priority ถูกต้อง
+    widget.onRun(
+      msg,
+      OptimizerLogic.getPriorityCommands(
+        NetworkPriorityScreen.activePriorityPkgs.toList(),
+      ),
+    );
+
+    // แจ้งเตือนเล็กๆ
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 1),
+        backgroundColor: isSelected ? Colors.blueAccent : Colors.grey,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ฟังก์ชัน Reset ทั้งหมด
+  void _resetAll() {
+    widget.onRun("Reset Network", OptimizerLogic.getResetNetworkCommands());
+    setState(() {
+      NetworkPriorityScreen.activePriorityPkgs.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Network restriction disabled")),
+    );
   }
 
   @override
@@ -130,23 +162,12 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
         title: const Text("Network Priority"),
         actions: [
           TextButton(
-            onPressed: () {
-              // ปุ่ม Reset (ล้างค่าทั้งหมด)
-              widget.onRun(
-                "Reset Network",
-                OptimizerLogic.getResetNetworkCommands(),
-              );
-              setState(() {
-                NetworkPriorityScreen.activePriorityPkgs.clear();
-                _selectedPkgs.clear();
-              });
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Network restriction disabled")),
-              );
-            },
-            child: const Text(
+            onPressed: isSystemActive ? _resetAll : null,
+            child: Text(
               "Reset",
-              style: TextStyle(color: Colors.redAccent),
+              style: TextStyle(
+                color: isSystemActive ? Colors.redAccent : Colors.grey,
+              ),
             ),
           ),
         ],
@@ -219,33 +240,19 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
                   ),
                 ),
 
-                // --- Selection Info ---
-                if (_selectedPkgs.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        "Selected: ${_selectedPkgs.length} apps",
-                        style: const TextStyle(
-                          color: Colors.blueAccent,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
+                const SizedBox(height: 10),
 
                 // --- List ---
                 Expanded(
                   child: ListView.builder(
                     itemCount: filteredPackages.length,
-                    cacheExtent: 100, // ช่วยให้ scroll ลื่น
+                    cacheExtent: 100,
                     itemBuilder: (context, index) {
                       final pkg = filteredPackages[index];
                       final name = _nameCache[pkg] ?? pkg;
 
-                      final bool isSelected = _selectedPkgs.contains(pkg);
-                      final bool isCurrentlyRunning = NetworkPriorityScreen
+                      // เช็คว่า Active อยู่หรือไม่
+                      final bool isChecked = NetworkPriorityScreen
                           .activePriorityPkgs
                           .contains(pkg);
 
@@ -255,13 +262,13 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: isCurrentlyRunning
-                              ? Colors.blueAccent.withOpacity(0.1)
-                              : (isSelected
-                                    ? Colors.grey.withOpacity(0.1)
-                                    : Colors.transparent),
+                          color: isChecked
+                              ? Colors.blueAccent.withOpacity(
+                                  0.1,
+                                ) // สีพื้นหลังเมื่อเลือก
+                              : Colors.transparent,
                           borderRadius: BorderRadius.circular(10),
-                          border: isCurrentlyRunning
+                          border: isChecked
                               ? Border.all(
                                   color: Colors.blueAccent.withOpacity(0.3),
                                 )
@@ -269,17 +276,14 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
                         ),
                         child: CheckboxListTile(
                           activeColor: Colors.blueAccent,
-                          // ใช้ Lazy Load Icon Widget
                           secondary: _buildAppIcon(pkg),
                           title: Text(
                             name,
                             style: TextStyle(
-                              fontWeight: isSelected || isCurrentlyRunning
+                              fontWeight: isChecked
                                   ? FontWeight.bold
                                   : FontWeight.normal,
-                              color: isCurrentlyRunning
-                                  ? Colors.blueAccent
-                                  : null,
+                              color: isChecked ? Colors.blueAccent : null,
                             ),
                           ),
                           subtitle: Text(
@@ -289,7 +293,7 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
                               color: Colors.grey,
                             ),
                           ),
-                          value: isSelected,
+                          value: isChecked,
                           onChanged: (bool? value) {
                             if (value != null) {
                               _toggleSelection(pkg, value);
@@ -305,64 +309,7 @@ class _NetworkPriorityScreenState extends State<NetworkPriorityScreen> {
                 ),
               ],
             ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 50),
-              backgroundColor: Colors.blueAccent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              elevation: 4,
-            ),
-            onPressed: _selectedPkgs.isEmpty
-                ? null
-                : () {
-                    // Save Active State
-                    setState(() {
-                      NetworkPriorityScreen.activePriorityPkgs = Set.from(
-                        _selectedPkgs,
-                      );
-                    });
-
-                    // สร้างข้อความ Log สวยๆ
-                    final selectedNames = _allPackageNames
-                        .where((pkg) => _selectedPkgs.contains(pkg))
-                        .map((pkg) => _nameCache[pkg] ?? pkg)
-                        .take(3)
-                        .join(", ");
-
-                    final suffix = _selectedPkgs.length > 3 ? "..." : "";
-
-                    // ส่งคำสั่งไปทำงาน
-                    widget.onRun(
-                      "Multi-Priority: ${_selectedPkgs.length} apps",
-                      OptimizerLogic.getPriorityCommands(
-                        _selectedPkgs.toList(),
-                      ),
-                    );
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          "🚀 Prioritizing: $selectedNames $suffix",
-                        ),
-                        backgroundColor: Colors.blueAccent,
-                        behavior: SnackBarBehavior.floating,
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  },
-            child: Text(
-              "Apply Priority (${_selectedPkgs.length})",
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ),
-      ),
+      // เอา BottomNavigationBar ออกแล้ว
     );
   }
 }
