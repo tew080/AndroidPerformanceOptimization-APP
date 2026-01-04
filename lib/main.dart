@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'widgets/process_manager.dart';
 import 'widgets/disabled_apps.dart';
 import 'widgets/auto_clean.dart';
+import 'widgets/dns.dart';
 
 void main() {
   runApp(const MyApp());
@@ -570,6 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     "speed-profile",
                   ),
                 ),
+
                 _buildSection("APP & Task Manager"),
                 _buildBtn(
                   "Auto RAM Cleaner",
@@ -608,6 +610,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   "Bloatware Manager",
                   Icons.delete_forever,
                   _showBloatwareDialog,
+                ),
+
+                _buildSection("Network & Security"),
+                _buildBtn(
+                  "Block Ads (Private DNS)",
+                  Icons.security,
+                  () => DnsDialog.show(context, _run),
                 ),
 
                 const SizedBox(height: 30),

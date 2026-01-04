@@ -354,4 +354,17 @@ class OptimizerLogic {
       "echo '✅ Cleanup Complete!'",
     ];
   }
+
+  static List<String> getDNSCommands(String dns) {
+    if (dns == "off") {
+      return [
+        'settings put global private_dns_mode opportunistic', // กลับไปใช้โหมด Auto
+        'settings delete global private_dns_specifier',
+      ];
+    }
+    return [
+      'settings put global private_dns_mode hostname',
+      'settings put global private_dns_specifier $dns',
+    ];
+  }
 }
