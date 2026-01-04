@@ -368,9 +368,6 @@ class OptimizerLogic {
 
   static List<String> getPriorityCommands(List<String> packageNames) {
     List<String> commands = [
-      // 1. เปิดโหมด High Power (Performance Mode)
-      'cmd power set-mode 0',
-
       // 2. เปิดโหมดประหยัดข้อมูล (Restrict Background) เพื่อบีบแอปอื่นที่ไม่ใช่แอปที่เราเลือก
       'cmd netpolicy set restrict-background true',
     ];
@@ -396,9 +393,6 @@ class OptimizerLogic {
     return [
       // ปิดโหมดจำกัดพื้นหลัง (แอปทุกตัวกลับมาใช้เน็ตได้ปกติ)
       'cmd netpolicy set restrict-background false',
-
-      // คืนค่าโหมดพลังงานปกติ
-      'cmd power set-mode 1',
 
       // (Optional) คุณอาจจะล้างค่า Whitelist ทั้งหมดที่เคยเพิ่มไว้ก็ได้
       // แต่ปกติการปิด restrict-background ในบรรทัดแรกก็เพียงพอแล้ว
