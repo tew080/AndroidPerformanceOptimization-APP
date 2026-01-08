@@ -651,7 +651,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     // ส่วนข้อความปกติ
                     const Text(
-                      "v1.0.1 | Github: ",
+                      "v1.0.2 | Github: ",
                       style: TextStyle(color: Colors.grey),
                     ),
                     // ส่วนที่เป็นปุ่มกด
